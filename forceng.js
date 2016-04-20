@@ -46,6 +46,8 @@ angular.module('forceng', [])
     // Because the OAuth login spans multiple processes, we need to keep the login success and error handlers as a variables
     // inside the module instead of keeping them local within the login function.
       deferredLogin,
+        
+      deferredLogout,
 
     // Reference to the Salesforce OAuth plugin
       oauthPlugin,
@@ -63,7 +65,7 @@ angular.module('forceng', [])
 
       if (useProxy) {
         url = proxyURL;
-      } else if (oauth.instance_url) {
+      } else if (oauth && oauth.instance_url) {
         url = oauth.instance_url;
       } else {
         url = serverURL;
@@ -226,7 +228,7 @@ angular.module('forceng', [])
         obj = parseQueryString(queryString);
         oauth = obj;
         tokenStore['forceOAuth'] = JSON.stringify(oauth);
-        if (deferredLogin) deferredLogin.resolve();
+        if (deferredLogin) deferredLogin.resolve(oauth);
       } else if (url.indexOf("error=") > 0) {
         queryString = decodeURIComponent(url.substring(url.indexOf('?') + 1));
         obj = parseQueryString(queryString);
@@ -261,7 +263,7 @@ angular.module('forceng', [])
           function (creds) {
             // Initialize ForceJS
             init({accessToken: creds.accessToken, instanceURL: creds.instanceUrl, refreshToken: creds.refreshToken});
-            if (deferredLogin) deferredLogin.resolve();
+            if (deferredLogin) deferredLogin.resolve(creds);
           },
           function (error) {
             console.log(error);
@@ -279,13 +281,48 @@ angular.module('forceng', [])
         oauthCallbackURL + '&response_type=token';
       window.open(loginWindowURL, '_blank', 'location=no');
     }
+    
+    function logout(){
+      deferredLogout = $q.defer();
+      if (window.cordova) {
+        logoutWithPlugin();
+      } else {
+        logoutWithBrowser();
+      }
+      return deferredLogout.promise;        
+    }
+    
+    function logoutWithPlugin(){
+      document.addEventListener("deviceready", function () {
+        oauthPlugin = cordova.require("com.salesforce.plugin.oauth");
+        if (!oauthPlugin) {
+          console.error('Salesforce Mobile SDK OAuth plugin not available');
+          if (deferredLogin) deferredLogin.reject({status: 'Salesforce Mobile SDK OAuth plugin not available'});
+          return;
+        }
+        //logout method doesn't support callbacks.
+        oauthPlugin.logout();
+        if (deferredLogout) deferredLogout.resolve();
+          
+      }, false);
+    }
+    
+    function logoutWithBrowser(){
+        if (deferredLogout) deferredLogout.resolve();
+    }
 
     /**
      * Gets the user's ID (if logged in)
      * @returns {string} | undefined
      */
     function getUserId() {
-      return (typeof(oauth) !== 'undefined') ? oauth.id.split('/').pop() : undefined;
+        //oauth.id could be undefined. it will throw error. 
+        if(typeof(oauth) !== 'undefined') {
+            if(oauth.id) {
+                return oauth.id.split('/').pop();
+            }
+        }
+        return undefined;
     }
 
     /**
@@ -523,6 +560,7 @@ angular.module('forceng', [])
     return {
       init: init,
       login: login,
+      logout: logout,
       getUserId: getUserId,
       isAuthenticated: isAuthenticated,
       request: request,
